@@ -7,8 +7,8 @@ The booking assistant allows signed-in members to discover, book, and cancel cla
 ## 1. Provider and Model
 
 - **Provider**: Google Gemini API via plain HTTP (`java.net.http.HttpClient` with Jackson), requiring no third-party LLM SDK dependencies.
-- **Default Model**: `gemini-2.5-flash-lite` (free tier).
-  - Can be overridden via the `LLM_MODEL` environment variable (e.g., `gemini-1.5-flash`).
+- **Default Model**: `gemini-1.5-flash` (free tier, with fallback to `gemini-2.0-flash`).
+  - Can be overridden via the `LLM_MODEL` environment variable (e.g., `gemini-2.0-flash`, `gemini-1.5-flash-8b`).
 - **Authentication**: Reads the API key strictly from the `LLM_API_KEY` environment variable at runtime. The key is never hardcoded or committed to source control.
 
 ---

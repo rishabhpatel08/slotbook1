@@ -86,7 +86,7 @@ public class AssistantService {
 
                 for (LlmTypes.FunctionCall call : step.functionCalls()) {
                     Object toolResult = executeTool(me, call);
-                    contents.add(new LlmTypes.Content("function", List.of(
+                    contents.add(new LlmTypes.Content("user", List.of(
                             LlmTypes.Part.ofFunctionResponse(call.name(), toolResult)
                     )));
                 }

@@ -15,7 +15,12 @@ import java.util.List;
 public class GeminiLlmClient implements LlmClient {
 
     private static final Logger log = LoggerFactory.getLogger(GeminiLlmClient.class);
-    private static final String DEFAULT_MODEL = "gemini-2.5-flash-lite";
+    private static final String DEFAULT_MODEL = "gemini-1.5-flash";
+    private static final List<String> FALLBACK_MODELS = List.of(
+            "gemini-1.5-flash",
+            "gemini-2.0-flash",
+            "gemini-1.5-flash-8b"
+    );
 
     private final HttpClient httpClient;
     private final ObjectMapper mapper;
@@ -57,21 +62,39 @@ public class GeminiLlmClient implements LlmClient {
             LlmTypes.GeminiRequest requestBody = new LlmTypes.GeminiRequest(sysContent, contents, tools);
             String jsonPayload = mapper.writeValueAsString(requestBody);
 
-            String url = "https://generativelanguage.googleapis.com/v1beta/models/" + model
-                    + ":generateContent?key=" + apiKey;
+            List<String> modelsToTry = new ArrayList<>();
+            modelsToTry.add(model);
+            for (String fb : FALLBACK_MODELS) {
+                if (!modelsToTry.contains(fb)) {
+                    modelsToTry.add(fb);
+                }
+            }
 
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .header("Content-Type", "application/json")
-                    .timeout(Duration.ofSeconds(20))
-                    .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
-                    .build();
+            HttpResponse<String> response = null;
+            String lastError = null;
 
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            for (String currentModel : modelsToTry) {
+                String url = "https://generativelanguage.googleapis.com/v1beta/models/" + currentModel
+                        + ":generateContent?key=" + apiKey;
 
-            if (response.statusCode() >= 400) {
-                log.error("Gemini API error ({}): {}", response.statusCode(), response.body());
-                throw new LlmProviderException("Gemini API call failed with status " + response.statusCode());
+                HttpRequest request = HttpRequest.newBuilder()
+                        .uri(URI.create(url))
+                        .header("Content-Type", "application/json")
+                        .timeout(Duration.ofSeconds(20))
+                        .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
+                        .build();
+
+                response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+                if (response.statusCode() < 400) {
+                    break;
+                }
+                lastError = "Model " + currentModel + " returned " + response.statusCode() + ": " + response.body();
+                log.warn("Gemini call failed with model {}: status {}", currentModel, response.statusCode());
+            }
+
+            if (response == null || response.statusCode() >= 400) {
+                log.error("All Gemini model attempts failed. Last error: {}", lastError);
+                throw new LlmProviderException("Gemini API call failed: " + lastError);
             }
 
             LlmTypes.GeminiResponse geminiResponse = mapper.readValue(response.body(), LlmTypes.GeminiResponse.class);

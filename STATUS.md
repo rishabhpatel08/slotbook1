@@ -88,5 +88,20 @@
 
 ## T3. Booking Assistant
 - **Status**: Done
-- **What was built**: Implemented AI booking assistant at `POST /api/assistant/chat` with Google Gemini API (`gemini-2.5-flash-lite`, free tier) via plain HTTP (`java.net.http.HttpClient`). Implemented 4 function calling tools (`list_classes`, `book`, `cancel`, `list_my_bookings`) with server-side identity enforcement (`CurrentMember.require()`), cancellation ownership validation, timezone anchoring in `Asia/Kolkata`, ambiguity detection, and conversation safety bounds. Created `ASSISTANT.md`.
+- **What was built**: Implemented AI booking assistant at `POST /api/assistant/chat` with Google Gemini API (`gemini-1.5-flash` / `gemini-2.0-flash` with automatic model fallback, free tier) via plain HTTP (`java.net.http.HttpClient`). Implemented 4 function calling tools (`list_classes`, `book`, `cancel`, `list_my_bookings`) with server-side identity enforcement (`CurrentMember.require()`), cancellation ownership validation, timezone anchoring in `Asia/Kolkata`, ambiguity detection, and conversation safety bounds. Created `ASSISTANT.md`.
 - **How it was verified**: Verified with `AssistantTest.java` (5 tests covering 401 unauthenticated, cross-member cancellation rejection, ambiguity clarification, end-to-end booking tool call, and missing API key handling). All passed.
+
+---
+
+## T4. Settlement (Wave 2)
+- **Status**: Done
+- **What was found**: Instructors are paid from member class fees. Core publishes every charge and refund on `Topics.PAYMENTS` (`PaymentRecorded`). Settlement must listen to payments, store them idempotently, batch them periodically (`slotbook.settlement.interval-seconds`, default 300s), calculate net charges/refunds and 70% net payout per instructor, seal batches immutably, and handle repeated messages, delayed broker delivery, and simulated DB crashes.
+- **What was built**:
+  1. Created Flyway migration `V300_1__settlement.sql` with tables `settlement_batches`, `settlement_payments` (with primary key on `event_id` and unique assignment to `batch_id`), and `settlement_lines`.
+  2. Implemented `SettlementListener` subscribing to `Topics.PAYMENTS` (`PaymentRecorded`) using `@JmsListener(destination = Topics.PAYMENTS, containerFactory = Topics.LISTENER_FACTORY, subscription = "settlement")`. Idempotent insert with `ON CONFLICT (event_id) DO NOTHING`.
+  3. Implemented `SettlementService.settle()`: atomically claims unsettled payments into a new batch, aggregates charges and refunds per instructor, computes 70% net payout with `BigDecimal.setScale(2, RoundingMode.HALF_UP)`, inserts line items, and deletes empty batches.
+  4. Scheduled batch closure in `SettlementScheduler` every `slotbook.settlement.interval-seconds`.
+  5. Implemented admin endpoints in `SettlementController`: `POST /api/modules/settlement/admin/settle`, `GET /batches`, `GET /batches/{id}` with admin security enforcement (`current.requireAdmin()`).
+- **How it was verified**:
+  1. Verified with `SettlementContractTest.java` (3 contract tests covering admin settle, batch listing, and line-item details). All passed.
+  2. Verified with the 5-minute chaos runner `SettlementChaosRun` (`chaos.cmd` / `./chaos.sh`): sent 600 payments with duplicate broker deliveries (20%), delivery delays up to 8000ms, and simulated database failures (3%). All 600 payments were settled exactly once across immutable closed batches, with 0 discrepancies and 0 problems found.

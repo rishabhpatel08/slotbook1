@@ -46,6 +46,11 @@ public class BookingRepository {
                 .single();
     }
 
+    /** Locks the slot row in the database for the duration of the current transaction. */
+    public void lockSlot(long slotId) {
+        jdbc.sql("select id from slots where id = :id for update").param("id", slotId).query().singleRow();
+    }
+
     public boolean hasConfirmed(long memberId, long slotId) {
         return jdbc.sql("select count(*) from bookings where slot_id = :slot and member_id = :member and status = 'CONFIRMED'")
                 .param("slot", slotId)

@@ -19,6 +19,16 @@ export default function MyPlan() {
   }
   if (!plan) return null
 
+  if (!plan.plan) {
+    return (
+      <div className="card">
+        <h2>No active plan</h2>
+        <p>You do not have an active membership plan yet.</p>
+        <p>Used this month: {plan.classesUsedThisMonth} classes</p>
+      </div>
+    )
+  }
+
   return (
     <div className="card">
       <h2>{plan.plan}</h2>

@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Clock;
 import java.time.LocalDate;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 @RestController
@@ -37,7 +38,7 @@ public class MeController {
     public Map<String, Object> myPlan() {
         MemberView me = current.require();
         Member member = members.findById(me.id()).orElseThrow();
-        Plan plan = members.findPlan(member.planId()).orElseThrow();
+        Plan plan = member.planId() == null ? null : members.findPlan(member.planId()).orElse(null);
 
         LocalDate firstOfMonth = LocalDate.ofInstant(clock.instant(), centreClock.zone()).withDayOfMonth(1);
         int used = jdbc.sql("""
@@ -51,10 +52,11 @@ public class MeController {
                 .query(Integer.class)
                 .single();
 
-        return Map.of(
-                "plan", plan.name(),
-                "classesPerMonth", plan.classesPerMonth(),
-                "monthlyPrice", plan.monthlyPrice(),
-                "classesUsedThisMonth", used);
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("plan", plan != null ? plan.name() : null);
+        response.put("classesPerMonth", plan != null ? plan.classesPerMonth() : 0);
+        response.put("monthlyPrice", plan != null ? plan.monthlyPrice() : 0.0);
+        response.put("classesUsedThisMonth", used);
+        return response;
     }
 }

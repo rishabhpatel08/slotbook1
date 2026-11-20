@@ -20,6 +20,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
@@ -56,6 +57,7 @@ public class BookingService implements Bookings {
         this.centreClock = centreClock;
     }
 
+    @Transactional
     @Override
     public BookingResult book(long memberId, long slotId) {
         Optional<Slot> found = slots.find(slotId);
@@ -66,6 +68,10 @@ public class BookingService implements Bookings {
         if (!slot.startsAt().isAfter(clock.instant())) {
             return new BookingResult(Outcome.SLOT_STARTED, null);
         }
+
+        // Lock the slot row to serialize concurrent booking attempts for this slot
+        bookings.lockSlot(slotId);
+
         if (bookings.hasConfirmed(memberId, slotId)) {
             return new BookingResult(Outcome.ALREADY_BOOKED, null);
         }

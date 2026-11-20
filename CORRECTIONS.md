@@ -39,3 +39,13 @@ What I did: Injected `CentreClock`, used `centreClock.zone()` for month boundari
 What the AI did: Created a test slot with hardcoded timestamp `2026-11-15T23:30:00Z` and called `host.book(member, slotId)`.
 How I noticed: The test failed with `java.lang.IllegalStateException: Could not book: SLOT_STARTED` because `BookingService.java:66` rejects booking slots in the past (`!slot.startsAt().isAfter(clock.instant())`), and `2026-11-15` was in the past relative to the system clock.
 What I did: Changed the test to compute the upcoming Monday dynamically using `LocalDate.now(kolkata).with(TemporalAdjusters.next(DayOfWeek.MONDAY))` at 5:00 AM IST, ensuring the slot is always in the future. For historical plan usage testing, inserted the confirmed booking directly via JDBC.
+
+## Duplicate seed bookings broke partial unique constraint in V5 migration
+What the AI did: Attempted to create a partial unique index on `bookings (slot_id, member_id) WHERE status = 'CONFIRMED'`.
+How I noticed: Inspected `V2__seed.sql` and found explicit duplicate bookings intentionally seeded (chess club members 5 and 9 duplicated across lines 112-116, and spoken English duplicate booking across lines 122-125). Creating the constraint without resolving these would cause Flyway migration to fail on startup.
+What I did: Added an UPDATE statement in `V5__prevent_overbooking.sql` to cancel duplicate confirmed bookings, keeping only the earliest (`id = min(id)`), before applying the unique index.
+
+## NullPointerException with Java Map.of when plan is null in MeController
+What the AI did: Proposed returning `Map.of("plan", plan != null ? plan.name() : null, ...)` when handling members without a plan.
+How I noticed: In Java, `Map.of()` rejects null values and throws `NullPointerException` at runtime.
+What I did: Used `LinkedHashMap` to construct the response map, allowing `plan: null` while preserving key ordering.

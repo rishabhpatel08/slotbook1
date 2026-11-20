@@ -55,6 +55,7 @@ public class MemberRepository {
     }
 
     public Optional<Plan> findPlan(Long id) {
+        if (id == null) return Optional.empty();
         return jdbc.sql("select * from plans where id = :id").param("id", id).query(PLAN).optional();
     }
 }

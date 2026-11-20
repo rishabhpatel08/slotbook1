@@ -167,3 +167,77 @@ The member reported: *"The times on the Notifications page look messy, with seco
   - `day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true`
   - Output format: `"20 Nov, 5:00 AM"` without seconds.
 - Kept the backend storage (`Instant` in `timestamptz`) unchanged; modified the display layer only.
+
+## T1.3 Saturday chess club overbooking & duplicate attendance
+
+### What was found
+The member reported: *"Saturday's 10:00 AM chess club has 20 seats. 22 people turned up with confirmed bookings. The admin attendance list also shows some members twice for the same class."*
+
+Investigation revealed three root causes:
+1. **Concurrency race condition in `BookingService.java`**:
+   - `BookingService.book()` performed a check-then-insert without locking: it checked `bookings.countConfirmed(slotId) >= slot.capacity()` and `bookings.hasConfirmed(memberId, slotId)` without database row locks or transaction isolation.
+   - Between the check and `bookings.insert()`, simulated payment processing `gateway.charge(memberId, slot.price())` sleeps for 120ms (`payments.gateway-delay-ms: 120`). Under concurrent bookings, multiple threads evaluated `countConfirmed` before any thread inserted, allowing overbooking beyond capacity.
+2. **Missing unique constraint on active bookings**:
+   - The database had no unique constraint preventing the same member from having multiple `CONFIRMED` bookings for the same slot.
+   - Seed data examination (`V2__seed.sql`):
+     - Lines 106-116: Chess club slot had 22 bookings for members 3..24 (`generate_series(0, 21)`), plus duplicate rows explicitly inserted for members 5 and 9 (`cross join (values (5), (9))`).
+     - Lines 119-125: Spoken English slot explicitly inserted duplicate bookings for `3 + ((s.id * 7) % 30)`.
+3. **Duplicate rows in Admin Attendance Query**:
+   - In `AdminController.java:37-43`, the attendance endpoint joined `bookings` directly to `members` without deduplicating by member ID, causing duplicate booking records for the same member to show up multiple times in the attendance roster.
+
+### What was done
+1. **Reproduced with Concurrent Tests (`ConcurrentBookingTest.java`)**:
+   - `concurrentOverbookingIsPrevented`: 8 threads concurrently attempt to book the last seat of a 1-seat slot. Before the fix, 4+ bookings succeeded (`expected: <1> but was: <4>`).
+   - `concurrentDuplicateBookingBySameMemberIsPrevented`: 4 threads concurrently book the same slot for the same member. Before the fix, multiple bookings succeeded.
+2. **Flyway Migration `V5__prevent_overbooking.sql`**:
+   - Resolves existing duplicate seed data: marks all duplicate `CONFIRMED` bookings for the same `(slot_id, member_id)` as `CANCELLED`, keeping only the earliest booking (`id = min(id)`).
+   - Creates a partial unique index:
+     `CREATE UNIQUE INDEX idx_bookings_active_member_slot ON bookings (slot_id, member_id) WHERE status = 'CONFIRMED';`
+3. **Pessimistic Slot Locking in `BookingRepository.java` & `BookingService.java`**:
+   - Added `lockSlot(long slotId)` in `BookingRepository`: executes `SELECT id FROM slots WHERE id = :id FOR UPDATE`.
+   - Annotated `BookingService.book()` with `@Transactional`. It calls `bookings.lockSlot(slotId)` before checking capacity or existing bookings, serializing concurrent booking attempts for the same slot.
+4. **Attendance Query Deduplication in `AdminController.java`**:
+   - Updated the query using PostgreSQL `DISTINCT ON (member_id)` ordered by `b.created_at, b.id` inside a subquery, ensuring each member appears at most once in chronological booking order.
+
+### How we know it is right
+- Ran `mvn -pl core "-Dtest=ConcurrentBookingTest" test` → 3 tests passed, 0 failures.
+- Concurrency test confirmed only 1 booking succeeded out of 8 concurrent threads, and only 1 booking succeeded out of 4 concurrent attempts by the same member.
+
+## T1.5 Error on My Plan for new members
+
+### What was found
+The member reported: *"New members get an error page when they open My Plan. Older members are fine."*
+
+Investigation revealed:
+1. **Null Plan ID on Signup / Seed Data**:
+   - When members register via `/api/auth/signup`, `members.insert` leaves `plan_id` as `NULL`.
+   - In seed data (`V2__seed.sql`), recent members 33, 34, 35 (e.g. `rohan@slotbook.test`, `diya.patel@slotbook.test`, `kabir.mehta@slotbook.test`) have `plan_id = null`.
+2. **`NoSuchElementException` in `MeController.java:40`**:
+   - Line 40 ran: `Plan plan = members.findPlan(member.planId()).orElseThrow();`.
+   - When `member.planId()` is `null`, `members.findPlan(null)` runs `select * from plans where id = null` (which returns empty `Optional`), causing `.orElseThrow()` to throw `java.util.NoSuchElementException: No value present`.
+   - This unhandled exception caused Spring Boot to return HTTP 500.
+3. **Frontend Error Page in `web/src/pages/MyPlan.jsx`**:
+   - On receiving HTTP 500, `MyPlan.jsx` caught the error and rendered the error page (`Something went wrong`).
+
+### What was done
+1. **Reproduced via `NewMemberPlanTest.java`**:
+   - Test signed up a new user via `POST /api/auth/signup` and immediately called `GET /api/me/plan`.
+   - Before fix: failed with HTTP 500 `java.util.NoSuchElementException: No value present`.
+2. **Fixed `MemberRepository.java`**:
+   - Added a null check in `findPlan(Long id)`: if `id == null`, immediately return `Optional.empty()` without executing invalid SQL.
+3. **Fixed `MeController.java`**:
+   - Handled null plan gracefully: `Plan plan = member.planId() == null ? null : members.findPlan(member.planId()).orElse(null);`.
+   - Constructed response map safely using `LinkedHashMap` (since Java `Map.of()` rejects null values).
+   - If member has no plan, returns:
+     `{"plan": null, "classesPerMonth": 0, "monthlyPrice": 0.0, "classesUsedThisMonth": used}`.
+4. **Enhanced Frontend `web/src/pages/MyPlan.jsx`**:
+   - Added clean empty-state UI for members with no active plan (`!plan.plan`):
+     - Displays `<h2>No active plan</h2>`
+     - Displays `<p>You do not have an active membership plan yet.</p>`
+     - Displays `<p>Used this month: {plan.classesUsedThisMonth} classes</p>`
+5. **Verified with Tests**:
+   - `NewMemberPlanTest` verifies new members without plans can access `/api/me/plan` and receive 200 with null plan and 0 monthly usage.
+
+### How we know it is right
+- Ran `mvn -pl core "-Dtest=NewMemberPlanTest" test` → 1 test passed, 0 failures.
+- Ran full test suite across all 9 modules (`mvn test`) → 37 tests passed, 0 failures.

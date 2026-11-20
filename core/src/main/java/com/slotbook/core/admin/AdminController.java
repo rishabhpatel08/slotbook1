@@ -32,15 +32,19 @@ public class AdminController {
         this.centreClock = centreClock;
     }
 
-    /** Everyone with a confirmed booking for a slot, in booking order. */
+    /** Everyone with a confirmed booking for a slot, in booking order (each member appears at most once). */
     @GetMapping("/api/admin/slots/{slotId}/attendance")
     public List<AttendanceRow> attendance(@PathVariable long slotId) {
         current.requireAdmin();
         return jdbc.sql("""
                         select b.id, b.member_id, m.name, m.email, b.status, b.created_at
-                        from bookings b join members m on m.id = b.member_id
-                        where b.slot_id = :slot and b.status = 'CONFIRMED'
-                        order by b.created_at
+                        from (
+                            select distinct on (member_id) id, member_id, status, created_at
+                            from bookings
+                            where slot_id = :slot and status = 'CONFIRMED'
+                            order by member_id, created_at, id
+                        ) b join members m on m.id = b.member_id
+                        order by b.created_at, b.id
                         """)
                 .param("slot", slotId)
                 .query((rs, i) -> new AttendanceRow(rs.getLong("id"), rs.getLong("member_id"), rs.getString("name"),

@@ -1,12 +1,17 @@
 package com.slotbook.core;
 
 import com.slotbook.contract.MemberView;
+import com.slotbook.core.config.Db;
 import com.slotbook.core.testing.SlotBookTest;
 import com.slotbook.core.testing.TestHost;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.web.servlet.MockMvc;
+
+import java.time.Duration;
+import java.time.Instant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -22,6 +27,9 @@ class BookingFlowTest {
 
     @Autowired
     TestHost host;
+
+    @Autowired
+    JdbcClient jdbc;
 
     @Test
     void memberBooksAndCancels() throws Exception {
@@ -63,6 +71,49 @@ class BookingFlowTest {
 
         mvc.perform(post("/api/bookings/" + theirs + "/cancel").header("Authorization", auth))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void cancel20HoursBeforeClassRefunds90Percent() throws Exception {
+        MemberView member = host.newMember("EarlyCancel20h");
+        String auth = host.auth(member);
+        Instant startsAt = Instant.now().plus(Duration.ofHours(20));
+        long slot = host.newSlot(5, startsAt);
+        long bookingId = host.book(member, slot);
+
+        mvc.perform(post("/api/bookings/" + bookingId + "/cancel").header("Authorization", auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.refund").value(405.0));
+        assertEquals(0, host.confirmedCount(slot));
+    }
+
+    @Test
+    void cancelUnder12HoursBeforeClassRefunds50Percent() throws Exception {
+        MemberView member = host.newMember("LateCancel6h");
+        String auth = host.auth(member);
+        Instant startsAt = Instant.now().plus(Duration.ofHours(6));
+        long slot = host.newSlot(5, startsAt);
+        long bookingId = host.book(member, slot);
+
+        mvc.perform(post("/api/bookings/" + bookingId + "/cancel").header("Authorization", auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.refund").value(225.0));
+        assertEquals(0, host.confirmedCount(slot));
+    }
+
+    @Test
+    void cancelClassAlreadyStartedIsRejected() throws Exception {
+        MemberView member = host.newMember("StartedClassCancel");
+        String auth = host.auth(member);
+        long activeSlot = host.newSlot(5, Instant.now().plus(Duration.ofHours(2)));
+        long activeBooking = host.book(member, activeSlot);
+        jdbc.sql("update slots set starts_at = :past where id = :id")
+                .param("past", Db.ts(Instant.now().minus(Duration.ofMinutes(10))))
+                .param("id", activeSlot)
+                .update();
+
+        mvc.perform(post("/api/bookings/" + activeBooking + "/cancel").header("Authorization", auth))
+                .andExpect(status().isConflict());
     }
 
     @Test

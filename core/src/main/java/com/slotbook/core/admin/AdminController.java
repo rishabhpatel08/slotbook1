@@ -1,5 +1,6 @@
 package com.slotbook.core.admin;
 
+import com.slotbook.contract.CentreClock;
 import com.slotbook.contract.CurrentMember;
 import com.slotbook.core.config.Db;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -8,9 +9,10 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.YearMonth;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 
@@ -22,10 +24,12 @@ public class AdminController {
 
     private final CurrentMember current;
     private final JdbcClient jdbc;
+    private final CentreClock centreClock;
 
-    public AdminController(CurrentMember current, JdbcClient jdbc) {
+    public AdminController(CurrentMember current, JdbcClient jdbc, CentreClock centreClock) {
         this.current = current;
         this.jdbc = jdbc;
+        this.centreClock = centreClock;
     }
 
     /** Everyone with a confirmed booking for a slot, in booking order. */
@@ -47,22 +51,22 @@ public class AdminController {
     /** Refunds paid out in a month (?month=2026-10), for reconciling with the payment gateway's report. */
     @GetMapping("/api/admin/reports/refunds")
     public Map<String, Object> refunds(@RequestParam String month) {
-        current.require();
+        current.requireAdmin();
         YearMonth ym = YearMonth.parse(month);
         List<Double> amounts = jdbc.sql("""
                         select amount from payments
                         where kind = 'REFUND' and created_at >= :from and created_at < :to
                         """)
-                .param("from", ym.atDay(1).atStartOfDay().atOffset(ZoneOffset.UTC))
-                .param("to", ym.plusMonths(1).atDay(1).atStartOfDay().atOffset(ZoneOffset.UTC))
+                .param("from", ym.atDay(1).atStartOfDay().atZone(centreClock.zone()).toOffsetDateTime())
+                .param("to", ym.plusMonths(1).atDay(1).atStartOfDay().atZone(centreClock.zone()).toOffsetDateTime())
                 .query(Double.class)
                 .list();
 
-        double total = 0;
+        BigDecimal total = BigDecimal.ZERO;
         for (double amount : amounts) {
-            total += amount;
+            total = total.add(BigDecimal.valueOf(amount));
         }
-        total = Math.floor(total * 100) / 100;
+        total = total.setScale(2, RoundingMode.HALF_UP);
 
         return Map.of("month", month, "refunds", amounts.size(), "total", total);
     }

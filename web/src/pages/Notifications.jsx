@@ -1,6 +1,19 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api.js'
 
+function formatNotificationTime(isoString) {
+  if (!isoString) return ''
+  const d = new Date(isoString)
+  return new Intl.DateTimeFormat('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    day: 'numeric',
+    month: 'short',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  }).format(d).replace('am', 'AM').replace('pm', 'PM')
+}
+
 export default function Notifications() {
   const [items, setItems] = useState([])
 
@@ -20,7 +33,7 @@ export default function Notifications() {
       {items.map((n) => (
         <div key={n.id} className={`card ${n.read ? 'muted' : ''}`}>
           {n.message}
-          <div className="muted small">{new Date(n.createdAt).toLocaleString('en-IN')}</div>
+          <div className="muted small">{formatNotificationTime(n.createdAt)}</div>
         </div>
       ))}
     </div>

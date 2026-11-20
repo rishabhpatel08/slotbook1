@@ -1,5 +1,6 @@
 package com.slotbook.core.slots;
 
+import com.slotbook.contract.CentreClock;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -19,11 +20,13 @@ public class SlotController {
     private final SlotRepository slots;
     private final SlotFormatter formatter;
     private final Clock clock;
+    private final CentreClock centreClock;
 
-    public SlotController(SlotRepository slots, SlotFormatter formatter, Clock clock) {
+    public SlotController(SlotRepository slots, SlotFormatter formatter, Clock clock, CentreClock centreClock) {
         this.slots = slots;
         this.formatter = formatter;
         this.clock = clock;
+        this.centreClock = centreClock;
     }
 
     /** Slots on one day (?date=2026-11-16) or a range of days (?from=...&to=..., both inclusive). */
@@ -37,13 +40,13 @@ public class SlotController {
             to = date;
         }
         if (from == null) {
-            from = LocalDate.now(clock);
+            from = LocalDate.ofInstant(clock.instant(), centreClock.zone());
         }
         if (to == null) {
             to = from;
         }
-        Instant start = from.atStartOfDay(clock.getZone()).toInstant();
-        Instant end = to.plusDays(1).atStartOfDay(clock.getZone()).toInstant();
+        Instant start = from.atStartOfDay(centreClock.zone()).toInstant();
+        Instant end = to.plusDays(1).atStartOfDay(centreClock.zone()).toInstant();
         return slots.between(start, end).stream().map(formatter::toDto).toList();
     }
 

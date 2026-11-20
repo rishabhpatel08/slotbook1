@@ -35,10 +35,9 @@ export const api = {
   del: (path) => request('DELETE', path),
 }
 
-// Today's date in the browser, as YYYY-MM-DD.
+// Today's date in the centre's time zone (Asia/Kolkata), as YYYY-MM-DD.
 export function localDateString(d = new Date()) {
-  const pad = (n) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(d)
 }
 
 export function rupees(amount) {

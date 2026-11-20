@@ -7,9 +7,11 @@
 // To add a module's UI, create web/src/modules/<name>/ and add one entry here.
 
 import RemindersPanel from './reminders/RemindersPanel.jsx'
+import WaitlistPanel from './waitlist/WaitlistPanel.jsx'
 
 export const modulePanels = [
   { module: 'reminders', placement: 'bookings', Component: RemindersPanel },
+  { module: 'waitlist', placement: 'slot', Component: WaitlistPanel },
 ]
 
 export function panelsFor(placement) {

@@ -7,6 +7,7 @@ import com.slotbook.contract.BookingResult.Outcome;
 import com.slotbook.contract.BookingView;
 import com.slotbook.contract.CancelResult;
 import com.slotbook.contract.Bookings;
+import com.slotbook.contract.CentreClock;
 import com.slotbook.contract.ForbiddenException;
 import com.slotbook.contract.MemberView;
 import com.slotbook.core.events.EventPublisher;
@@ -21,9 +22,12 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -39,15 +43,17 @@ public class BookingService implements Bookings {
     private final PaymentRepository payments;
     private final EventPublisher events;
     private final Clock clock;
+    private final CentreClock centreClock;
 
     public BookingService(BookingRepository bookings, SlotRepository slots, PaymentGateway gateway,
-                          PaymentRepository payments, EventPublisher events, Clock clock) {
+                          PaymentRepository payments, EventPublisher events, Clock clock, CentreClock centreClock) {
         this.bookings = bookings;
         this.slots = slots;
         this.gateway = gateway;
         this.payments = payments;
         this.events = events;
         this.clock = clock;
+        this.centreClock = centreClock;
     }
 
     @Override
@@ -124,12 +130,16 @@ public class BookingService implements Bookings {
         }
         Slot slot = slots.find(booking.slotId()).orElseThrow();
         Instant now = clock.instant();
-        if (!slot.startsAt().isAfter(now)) {
+        ZoneId zone = centreClock.zone();
+        ZonedDateTime nowZoned = now.atZone(zone);
+        ZonedDateTime startsAtZoned = slot.startsAt().atZone(zone);
+        if (!startsAtZoned.isAfter(nowZoned)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "The class has already started");
         }
 
-        boolean early = Duration.between(now, slot.startsAt()).toHours() >= 24;
-        double refund = RefundCalculator.refundFor(booking.amount(), early);
+        boolean early = RefundCalculator.isEarly(now, slot.startsAt(), zone);
+        BigDecimal refundAmount = RefundCalculator.refundFor(BigDecimal.valueOf(booking.amount()), early);
+        double refund = refundAmount.doubleValue();
 
         bookings.markCancelled(bookingId, now);
         payments.record(bookingId, "REFUND", refund);

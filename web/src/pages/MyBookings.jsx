@@ -4,7 +4,12 @@ import { panelsFor } from '../modules/index.js'
 
 function dayHeading(isoDate) {
   const [y, m, d] = isoDate.split('-').map(Number)
-  return new Date(y, m - 1, d).toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short' })
+  return new Date(Date.UTC(y, m - 1, d, 12, 0, 0)).toLocaleDateString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    weekday: 'long',
+    day: 'numeric',
+    month: 'short',
+  })
 }
 
 export default function MyBookings({ me }) {
@@ -19,7 +24,7 @@ export default function MyBookings({ me }) {
 
   async function cancel(b) {
     if (!window.confirm(`Cancel ${b.slot.batchName} on ${b.slot.startsAtLocal}?\n\n` +
-      'You get 90% back if you cancel at least 24 hours before the class, otherwise 50%.')) return
+      'You get 90% back if you cancel at least 12 hours before the class, otherwise 50%.')) return
     try {
       const res = await api.post(`/api/bookings/${b.id}/cancel`)
       setMessage(`Cancelled. ${rupees(res.refund)} will be refunded.`)

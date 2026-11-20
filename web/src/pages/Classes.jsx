@@ -2,10 +2,10 @@ import { useCallback, useEffect, useState } from 'react'
 import { api, localDateString, rupees } from '../api.js'
 import { panelsFor } from '../modules/index.js'
 
-function addDays(date, days) {
-  const d = new Date(date)
-  d.setDate(d.getDate() + days)
-  return d
+function addDays(isoDateString, days) {
+  const [y, m, d] = isoDateString.split('-').map(Number)
+  const next = new Date(Date.UTC(y, m - 1, d + days, 12, 0, 0))
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(next)
 }
 
 export default function Classes({ me }) {
@@ -14,10 +14,10 @@ export default function Classes({ me }) {
   const [message, setMessage] = useState(null)
 
   const load = useCallback(() => {
-    const today = new Date()
+    const today = localDateString()
     const query = tab === 'today'
-      ? `date=${localDateString(today)}`
-      : `from=${localDateString(today)}&to=${localDateString(addDays(today, 6))}`
+      ? `date=${today}`
+      : `from=${today}&to=${addDays(today, 6)}`
     api.get(`/api/slots?${query}`).then(setSlots).catch((e) => setMessage(e.message))
   }, [tab])
 
@@ -37,10 +37,15 @@ export default function Classes({ me }) {
     load()
   }
 
-  // Group by day for the week view.
+  // Group by day for the week view (in centre's time zone).
   const groups = []
   for (const slot of slots) {
-    const day = new Date(slot.startsAt).toDateString()
+    const day = new Intl.DateTimeFormat('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+    }).format(new Date(slot.startsAt))
     if (!groups.length || groups[groups.length - 1].day !== day) groups.push({ day, slots: [] })
     groups[groups.length - 1].slots.push(slot)
   }

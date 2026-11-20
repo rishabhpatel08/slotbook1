@@ -241,3 +241,35 @@ Investigation revealed:
 ### How we know it is right
 - Ran `mvn -pl core "-Dtest=NewMemberPlanTest" test` → 1 test passed, 0 failures.
 - Ran full test suite across all 9 modules (`mvn test`) → 37 tests passed, 0 failures.
+
+## T3 Booking Assistant
+
+### What was built
+Implemented an AI chat assistant endpoint in core under `com.slotbook.core.assistant`:
+- **Endpoint**: `POST /api/assistant/chat` with `{"messages": [{"role": "user", "content": "..."}]}` returning `200 {"reply": "..."}`.
+- **Provider & Model**: Google Gemini API (`gemini-2.5-flash-lite`, free tier) invoked over standard HTTP (`java.net.http.HttpClient` with Jackson) with zero extra Maven dependencies.
+- **API Key**: Loaded from `LLM_API_KEY` environment variable. Never hardcoded or committed.
+
+### Implemented Tools & Safety Enforcements
+1. **Four Function Tools**:
+   - `list_classes(date)`: Queries slots on a given date (`YYYY-MM-DD`) anchored to the centre's timezone (`Asia/Kolkata`).
+   - `book(slotId)`: Books a confirmed seat for the authenticated member.
+   - `cancel(bookingId)`: Cancels a confirmed booking and initiates a refund.
+   - `list_my_bookings()`: Lists all bookings belonging to the member with class details.
+2. **Server-Side Safety Enforced in Code**:
+   - **Identity Enforced**: `CurrentMember.require()` authenticates the member from the session token. Tool signatures take no `memberId` parameter.
+   - **Cancellation Ownership**: `AssistantTools.cancel` verifies `booking.memberId() == me.id()`. If a member attempts to cancel someone else's booking, the tool strictly refuses with an error.
+   - **Centre Timezone Resolution**: The system prompt provides today's date, day of week, and tomorrow's date using `CentreClock` (`Asia/Kolkata`).
+   - **Ambiguity Guard**: The prompt and tools require that if a request matches multiple classes/bookings or none, the assistant must ask a clarifying question and never execute `book` or `cancel`.
+   - **Abuse & Loop Prevention**: Limits conversation history to 20 messages, message length to 2,000 characters, and tool rounds to 5 iterations.
+   - **Graceful Fallbacks**: Returns clear human-readable messages when `LLM_API_KEY` is missing or if the provider fails.
+
+### Documentation & Verification
+- Created `ASSISTANT.md` with provider info, curl examples, and safety documentation.
+- Created `AssistantTest.java` with 5 tests:
+  1. `unauthenticatedCallsAreRejected`: Returns 401.
+  2. `assistantCannotActForAnotherMember`: Verifies attempts to cancel another member's booking are rejected and the other booking remains `CONFIRMED`.
+  3. `asksClarifyingQuestionWhenAmbiguous`: Verifies clarification is asked without booking when multiple slots match.
+  4. `successfulToolCallFlowToBookClass`: Verifies tool loop correctly books slot for authenticated member.
+  5. `missingApiKeyReturnsClearMessage`: Returns friendly error message when `LLM_API_KEY` is null.
+- Verified with `mvn test`: 42 tests passing across all 9 modules with 0 failures.

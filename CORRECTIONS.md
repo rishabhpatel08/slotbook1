@@ -49,3 +49,8 @@ What I did: Added an UPDATE statement in `V5__prevent_overbooking.sql` to cancel
 What the AI did: Proposed returning `Map.of("plan", plan != null ? plan.name() : null, ...)` when handling members without a plan.
 How I noticed: In Java, `Map.of()` rejects null values and throws `NullPointerException` at runtime.
 What I did: Used `LinkedHashMap` to construct the response map, allowing `plan: null` while preserving key ordering.
+
+## Unloaded nested @TestConfiguration under @SlotBookTest in AssistantTest
+What the AI did: Defined a nested static `@TestConfiguration` class in `AssistantTest` with a fake LLM client, expecting Spring Boot to load it automatically.
+How I noticed: Test failed with `NoSuchBeanDefinitionException: No qualifying bean of type 'com.slotbook.core.AssistantTest$FakeLlmClient' available`. Because `@SlotBookTest` specifies `classes = SlotBookApplication.class`, nested `@TestConfiguration` classes are not picked up implicitly.
+What I did: Added `@Import(AssistantTest.Config.class)` to `AssistantTest` to register the fake LLM client bean in the test context.
